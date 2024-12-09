@@ -1,0 +1,15 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL") // Set your database URL in a .env file
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model MenuItem {
+  id    Int     @id @default(autoincrement())
+  name  String  @db.VarChar(255)
+  price Float
+  image String  @db.VarChar(255)
+}
