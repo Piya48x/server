@@ -21,7 +21,7 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     // Use the original filename for simplicity
     cb(null, Date.now() + '-' + file.originalname);
-  }
+  },
 });
 const upload = multer({ storage });
 
@@ -30,20 +30,25 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Serve static files from uploads directory
 
-// Get all menu items
 app.get('/menu-items', async (req, res) => {
+  const { category, search } = req.query;
+  const where = {};
+  if (category) where.category = category;
+  if (search) where.name = { contains: search, mode: 'insensitive' };
+
   try {
-    const menuItems = await prisma.menuItem.findMany();
+    const menuItems = await prisma.menuItem.findMany({ where });
     res.json(menuItems);
   } catch (error) {
-    console.error(error);
+    console.error('Error fetching menu items:', error);
     res.status(500).json({ error: 'Error fetching menu items' });
   }
 });
 
+
 // Add a new menu item
-app.post('/menu-items', upload.single('image'), async (req, res) => {    
-  const { name, price } = req.body;
+app.post('/menu-items', upload.single('image'), async (req, res) => {
+  const { name, price, category } = req.body; // Include category in the request body
   const floatPrice = parseFloat(price);
 
   try {
@@ -51,8 +56,9 @@ app.post('/menu-items', upload.single('image'), async (req, res) => {
       data: {
         name: name,
         price: floatPrice,
-        image: req.file.path // Save the path of the uploaded image
-      }   
+        image: req.file.path, // Save the path of the uploaded image
+        category: category, // Save the category
+      },
     });
     res.json(newItem);
   } catch (error) {
@@ -64,12 +70,13 @@ app.post('/menu-items', upload.single('image'), async (req, res) => {
 // Update a menu item
 app.put('/menu-items/:id', upload.single('image'), async (req, res) => {
   const { id } = req.params;
-  const { name, price } = req.body;
+  const { name, price, category } = req.body; // Include category in the request body
   const floatPrice = parseFloat(price);
-  
+
   const updateData = {
     name: name,
     price: floatPrice,
+    category: category, // Update the category
   };
 
   // If a new image is uploaded, update the image field
@@ -89,10 +96,12 @@ app.put('/menu-items/:id', upload.single('image'), async (req, res) => {
   }
 });
 
+
+
 // Delete a menu item
 app.delete('/menu-items/:id', async (req, res) => {
   const { id } = req.params;
-  
+
   try {
     await prisma.menuItem.delete({
       where: { id: Number(id) },

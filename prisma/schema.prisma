@@ -8,8 +8,10 @@ generator client {
 }
 
 model MenuItem {
-  id    Int     @id @default(autoincrement())
-  name  String  @db.VarChar(255)
-  price Float
-  image String  @db.VarChar(255)
+  id       Int     @id @default(autoincrement())
+  name     String  @db.VarChar(255)
+  price    Float
+  image    String  @db.VarChar(255)
+  category String  @db.VarChar(255) @default("Uncategorized") // Add a default value
 }
+
