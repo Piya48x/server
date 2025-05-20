@@ -1,0 +1,263 @@
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const { PrismaClient } = require('@prisma/client');
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+const prisma = new PrismaClient();
+
+// Set up multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = 'uploads';
+    // Create uploads directory if it doesn't exist
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir);
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    // Use the original filename for simplicity
+    cb(null, Date.now() + '-' + file.originalname);
+  },
+});
+const upload = multer({ dest: 'uploads/' }); // กำหนดโฟลเดอร์สำหรับเก็บไฟล์
+
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Serve static files from uploads directory
+
+app.get('/menu-items', async (req, res) => {
+  const { category, search } = req.query;
+  const where = {};
+  if (category) where.category = category;
+  if (search) where.name = { contains: search, mode: 'insensitive' };
+
+  try {
+    const menuItems = await prisma.menuItem.findMany({ where });
+    res.json(menuItems);
+  } catch (error) {
+    console.error('Error fetching menu items:', error);
+    res.status(500).json({ error: 'Error fetching menu items' });
+  }
+});
+
+
+// Add a new menu item
+app.post('/menu-items', upload.single('image'), async (req, res) => {
+  const { name, price, category } = req.body; // Include category in the request body
+  const floatPrice = parseFloat(price);
+
+  try {
+    const newItem = await prisma.menuItem.create({
+      data: {
+        name: name,
+        price: floatPrice,
+        image: req.file.path, // Save the path of the uploaded image
+        category: category, // Save the category
+      },
+    });
+    res.json(newItem);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error creating menu item' });
+  }
+});
+
+// Update a menu item
+
+app.put('/menu-items/:id', upload.single('image'), async (req, res) => {
+  const { id } = req.params;
+  const { name, price, category } = req.body;
+  const floatPrice = parseFloat(price);
+
+  const updateData = {
+    name: name,
+    price: floatPrice,
+    category: category,
+  };
+
+  try {
+    // Find the existing menu item
+    const existingItem = await prisma.menuItem.findUnique({ where: { id: Number(id) } });
+
+    if (!existingItem) {
+      return res.status(404).json({ error: 'Menu item not found' });
+    }
+
+    // If a new image is uploaded, delete the old image
+    if (req.file) {
+      if (existingItem.image) {
+        await fs.unlink(existingItem.image).catch((err) => console.error('Error deleting old image:', err));
+      }
+      updateData.image = req.file.path;
+    }
+
+    const updatedItem = await prisma.menuItem.update({
+      where: { id: Number(id) },
+      data: updateData,
+    });
+    res.json(updatedItem);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error updating menu item' });
+  }
+});
+
+
+
+// Delete a menu item
+app.delete('/menu-items/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await prisma.menuItem.delete({
+      where: { id: Number(id) },
+    });
+    res.json({ message: 'Menu item deleted' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error deleting menu item' });
+  }
+});
+
+// Start the server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+/---------------------------------------------------------------------------------------------------------------------------------------
+import React, { useState, useEffect } from 'react';
+import EditMenuPopup from './EditMenuPopup';
+
+function MenuList() {
+  const [menuItems, setMenuItems] = useState([]);
+  const [editingItem, setEditingItem] = useState(null);
+
+  useEffect(() => {
+    fetchMenuItems();
+  }, []);
+
+  const fetchMenuItems = async () => {
+    try {
+      const response = await fetch('http://localhost:3000/menu-items');
+      const data = await response.json();
+      setMenuItems(data);
+    } catch (error) {
+      console.error('Error fetching menu items:', error);
+    }
+  };
+
+  const handleEditClick = (item) => {
+    setEditingItem(item);
+  };
+
+  const handleUpdateMenuItem = async (updatedItem) => {
+    const formData = new FormData();
+    formData.append('name', updatedItem.name);
+    formData.append('price', updatedItem.price);
+    formData.append('category', updatedItem.category);
+    if (updatedItem.image instanceof File) {
+      formData.append('image', updatedItem.image);
+    }
+
+    try {
+      const response = await fetch(`http://localhost:3000/menu-items/${updatedItem.id}`, {
+        method: 'PUT',
+        body: formData,
+      });
+
+      if (response.ok) {
+        const updatedMenuItem = await response.json();
+        setMenuItems((prev) =>
+          prev.map((item) => (item.id === updatedMenuItem.id ? updatedMenuItem : item))
+        );
+        setEditingItem(null); // Close the popup
+      } else {
+        console.error('Failed to update menu item');
+      }
+    } catch (error) {
+      console.error('Error updating menu item:', error);
+    }
+  };
+
+  const deleteMenuItem = async (id) => {
+    try {
+      const response = await fetch(`http://localhost:3000/menu-items/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        setMenuItems((prev) => prev.filter((item) => item.id !== id));
+      } else {
+        console.error('Failed to delete menu item');
+      }
+    } catch (error) {
+      console.error('Error deleting menu item:', error);
+    }
+  };
+
+  return (
+    <div className="container mx-auto p-4">
+      {Object.keys(
+        menuItems.reduce((acc, item) => {
+          acc[item.category] = acc[item.category] || [];
+          acc[item.category].push(item);
+          return acc;
+        }, {})
+      ).map((category) => (
+        <div key={category} className="mb-8">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">{category}</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {menuItems
+              .filter((item) => item.category === category)
+              .map((item) => (
+                <div
+                  key={item.id}
+                  className="border border-gray-200 rounded-lg shadow-lg overflow-hidden transform hover:scale-105 transition-transform duration-300"
+                >
+                  <img
+                    src={`http://localhost:3000/${item.image}?timestamp=${new Date().getTime()}`}
+                    alt={item.name}
+                    className="w-full h-48 object-cover"
+                  />
+                  <div className="p-4">
+                    <h2 className="text-xl font-bold text-gray-800">{item.name}</h2>
+                    <p className="text-gray-600 text-lg mt-2">{item.price.toFixed(2)} บาท</p>
+                    <p className="text-gray-500 text-sm mt-1">หมวดหมู่: {item.category}</p>
+                    <div className="mt-4 flex space-x-2">
+                      <button
+                        onClick={() => handleEditClick(item)}
+                        className="bg-yellow-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-yellow-600 transition-colors duration-300"
+                      >
+                        แก้ไข
+                      </button>
+                      <button
+                        onClick={() => deleteMenuItem(item.id)}
+                        className="bg-red-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-600 transition-colors duration-300"
+                      >
+                        ลบ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      ))}
+      {editingItem && (
+        <EditMenuPopup
+          menu={editingItem}
+          onClose={() => setEditingItem(null)}
+          onUpdate={handleUpdateMenuItem}
+        />
+      )}
+    </div>
+  );
+}
+
+export default MenuList;
